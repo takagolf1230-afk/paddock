@@ -28,7 +28,13 @@ let S = load();
 let view = "race";
 let memoryOnly = false;
 
-function defaults() { return { data: null, obs: [], draft: {}, ui: { race: null, phase: "パドック", open: {} } }; }
+function defaults() { return { data: null, obs: [], draft: {}, ui: { race: null, phase: "パドック", open: {}, theme: "light" } }; }
+/* 明るい表示(標準)と暗い表示の切り替え。屋外では明るい表示が見やすい */
+function applyTheme() {
+  const t = S.ui && S.ui.theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = t;
+  const m = document.getElementById("themecolor"); if (m) m.setAttribute("content", t === "dark" ? "#0b0b0b" : "#f6f3ea");
+}
 function load() {
   try { const o = JSON.parse(localStorage.getItem(KEY) || "{}"); return Object.assign(defaults(), o); } catch (e) { memoryOnly = true; return defaults(); }
 }
@@ -54,18 +60,30 @@ function startDate(r) {
   const d = S.data.date; return new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8), +r.start.slice(0, 2), +r.start.slice(2, 4), 0);
 }
 
+const BROKEN = "文字列が壊れています(コピー・貼り付けの途中で、文字が欠けたり変わったりしました)。もう一度コピーし直すか、PCが作った『phone_data_日付.txt』のファイルを『ファイルを選ぶ』で読み込んでください";
 async function decodeData(text) {
-  const t = (text || "").trim();
+  const t = (text || "").replace(/\s+/g, "");
   if (t.startsWith("LH1:")) {
     if (typeof DecompressionStream === "undefined") throw new Error("このiPhoneのiOSが古いため、読み込めません(iOS 16.4以上が必要)");
-    const bin = atob(t.slice(4).replace(/\s+/g, ""));
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    const ds = new DecompressionStream("deflate");
-    const stream = new Blob([bytes]).stream().pipeThrough(ds);
-    return JSON.parse(await new Response(stream).text());
+    try {
+      const bin = atob(t.slice(4));
+      const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      const ds = new DecompressionStream("deflate");
+      const stream = new Blob([bytes]).stream().pipeThrough(ds);
+      return JSON.parse(await new Response(stream).text());
+    } catch (e) { throw new Error(BROKEN); }
   }
-  if (t.startsWith("{")) return JSON.parse(t);
-  throw new Error("『LH1:』で始まるデータを貼り付けてください");
+  if (t.startsWith("{")) { try { return JSON.parse(text.trim()); } catch (e) { throw new Error(BROKEN); } }
+  throw new Error("『LH1:』で始まるデータを貼り付けるか、ファイルを選んでください");
+}
+/* 検査値(CRC32)。文字列が途中で壊れていないかをPC側で確かめる */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(bytes) { let c = 0xffffffff; for (const b of bytes) c = CRC_T[(c ^ b) & 0xff] ^ (c >>> 8); return ((c ^ 0xffffffff) >>> 0).toString(16).padStart(8, "0"); }
+async function deflateB64(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate"));
+  const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+  let s = ""; for (const b of buf) s += String.fromCharCode(b);
+  return btoa(s);
 }
 async function loadData(text) {
   const d = await decodeData(text);
@@ -73,10 +91,24 @@ async function loadData(text) {
   S.data = d; S.ui.race = d.races.length ? d.races[0].id : null; save();
   return d;
 }
-function exportRecords() {
+async function exportRecords() {
   const recs = S.obs.filter((o) => !o.void);
   const json = JSON.stringify({ v: 1, made: localISO(new Date()), recs });
-  return "LHREC1:" + btoa(unescape(encodeURIComponent(json)));
+  const bytes = new TextEncoder().encode(json);
+  if (typeof CompressionStream === "undefined") return "LHREC1:" + btoa(unescape(encodeURIComponent(json)));  // 古いiOS: 圧縮なし(検査値なし)
+  const body = await deflateB64(bytes);
+  return `LHREC2:${crc32(new TextEncoder().encode(body))}:${body}`;
+}
+let recText = "";
+async function prepRecords() {
+  recText = await exportRecords();
+  const out = document.getElementById("out"); if (out) out.value = recText;
+  document.querySelectorAll("[data-needrec]").forEach((b) => { b.disabled = false; });
+}
+const ymd = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`; };
+function download(name, text) {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 /* ---------- 操作 ---------- */
@@ -103,12 +135,13 @@ const $app = () => document.getElementById("app");
 function render() {
   const r = curRace(); const ph = S.ui.phase;
   let html = `<div class="top"><div class="row"><select id="race" class="grow">${races().map((x) => `<option value="${esc(x.id)}" ${r && x.id === r.id ? "selected" : ""}>${esc(x.label)}${x.start ? " " + esc(x.start.slice(0, 2) + ":" + x.start.slice(2, 4)) : ""}${x.rough ? "【" + esc(x.rough.label) + "】" : ""}</option>`).join("") || "<option>(データ未読み込み)</option>"}</select>
-    <button data-act="prev">◀</button><button data-act="next">▶</button></div>
+    <button data-act="prev">◀</button><button data-act="next">▶</button><button class="themebtn" data-act="theme">${S.ui.theme === "dark" ? "明るく" : "暗く"}</button></div>
     <div class="nav">${[["race", "記入"], ["summary", "まとめ"], ["guide", "見方"], ["data", "データ"]].map(([k, l]) => `<button data-view="${k}" class="${view === k ? "on" : ""}">${l}</button>`).join("")}</div>
     ${view === "race" ? `<div class="seg">${PHASES.map((p) => `<button data-phase="${p}" class="${p === ph ? "on" : ""}">${p}</button>`).join("")}</div>` : ""}</div>`;
   if (memoryOnly) html += `<div class="banner warn">この端末では保存ができない状態です(プライベートブラウズなど)。通常のSafariで開いてください。</div>`;
   html += view === "race" ? viewRace(r, ph) : view === "summary" ? viewSummary(r) : view === "guide" ? viewGuide() : viewData();
   $app().innerHTML = html;
+  if (view === "data") prepRecords();  // 記録の文字列を先に作っておく(コピー・共有を、タップの直後にすぐ実行するため)
   const bar = document.getElementById("bar"); if (bar) bar.remove();
   if (view === "race" && r) {
     const b = document.createElement("div"); b.id = "bar"; b.className = "bar";
@@ -164,7 +197,7 @@ function viewRace(r, ph) {
 function viewSummary(r) {
   if (!r) return `<div class="banner">データが未読み込みです。</div>`;
   let html = banner(r) + `<h2>${esc(r.label)} まとめ(人気順)</h2><div class="mute">自分の評価と人気・データを並べただけです。買い目の提案ではありません。</div>
-    <table><tr><th>馬番</th><th class="l">馬名</th><th>人気</th><th>単勝</th><th>パド</th><th>返し</th><th>✓</th></tr>`;
+    <table><tr><th>番</th><th class="l">馬名</th><th>人気</th><th>単勝</th><th>パド</th><th>返し</th><th>✓</th></tr>`;
   const rows = r.horses.slice().sort((a, b) => (a.pop == null ? 99 : a.pop) - (b.pop == null ? 99 : b.pop) || a.no - b.no);
   for (const h of rows) {
     const g = (ph) => { const o = savedOf(r.id, h.no, ph) || draftOf(r.id, h.no, ph); return o || null; };
@@ -193,11 +226,15 @@ function viewGuide() {
 function viewData() {
   const d = S.data; const n = S.obs.filter((o) => !o.void).length;
   return `<h2>データ(PC → スマホ)</h2><div class="banner">${d ? `読み込み済み: <b>${esc(d.date)}</b> ${d.races.length}レース(作成 ${esc(d.made || "")})` : "未読み込みです。"}<br><span class="mute">PCの穴馬検索で『スマホ用データをコピー』を押し、メモやLINEなどでスマホに送って、ここに貼り付けます。</span></div>
-  <textarea id="paste" rows="4" placeholder="LH1:…"></textarea><div class="row" style="margin-top:8px"><button data-act="load" class="grow">読み込む</button></div>
+  <textarea id="paste" rows="4" placeholder="LH1:…"></textarea><div class="row" style="margin-top:8px"><button data-act="load" class="grow">貼り付けた文字列を読み込む</button></div>
+  <div style="margin-top:8px"><div class="mute">または、PCが作ったファイル(phone_data_日付.txt)を選ぶ(文字列が壊れる心配がありません)</div><input type="file" id="file" accept=".txt,text/plain" style="margin-top:6px;width:100%"></div>
   <h2>記録(スマホ → PC)</h2><div class="banner">保存した記録: <b>${n}件</b>(取り消した分は含みません)<br><span class="mute">レースが終わったら『記録をコピー』を押し、PCの穴馬検索『パドック』タブの『スマホの記録を取り込む』に貼り付けます。記録はこの端末の中だけに保存されています。Safariのデータを消すと消えるので、こまめにコピーしてください。</span></div>
-  <div class="row"><button data-act="copy" class="grow">記録をコピー</button></div>
-  <textarea id="out" rows="3" readonly placeholder="コピーできないときは、ここに表示された文字列を全部選んでコピー" style="margin-top:8px"></textarea>
-  <h2>そのほか</h2><div class="row"><button data-act="wipe" class="grow">保存した記録を全部消す</button></div>`;
+  <div class="row"><button data-act="share" data-needrec disabled class="grow" style="background:var(--accent);color:#1b1810;border-color:var(--accent);font-weight:800">ファイルで共有(おすすめ)</button></div>
+  <div class="mute" style="margin:4px 0 8px">共有の画面で『メール』『LINE』『ファイル(iCloud Drive)』『AirDrop』などを選び、PCで開けるところへ送ります。文字列と違って、途中で壊れません。</div>
+  <div class="row"><button data-act="copy" data-needrec disabled class="grow">記録をコピー(文字列)</button></div>
+  <textarea id="out" rows="3" readonly placeholder="準備中…" style="margin-top:8px"></textarea>
+  <h2>そのほか</h2><div class="row"><button data-act="wipe" class="grow">保存した記録を全部消す</button></div>
+  <div class="mute" style="margin-top:12px">アプリのバージョン: 3(2026-11-04。明るい表示を標準にして、文字を大きくした。右上の『暗く/明るく』で切り替え)</div>`;
 }
 
 /* ---------- イベント ---------- */
@@ -210,6 +247,7 @@ document.addEventListener("click", async (e) => {
   if (b.dataset.v !== undefined && r) { setItem(r.id, no, ph, b.closest(".tri").dataset.k, +b.dataset.v); keepScroll(); return; }
   if (b.dataset.tag && r) { toggleTag(r.id, no, ph, b.dataset.tag); keepScroll(); return; }
   const act = b.dataset.act; if (!act) return;
+  if (act === "theme") { S.ui.theme = S.ui.theme === "dark" ? "light" : "dark"; save(); applyTheme(); render(); return; }
   if (act === "prev" || act === "next") { const i = races().findIndex((x) => r && x.id === r.id) + (act === "next" ? 1 : -1); if (races()[i]) { S.ui.race = races()[i].id; save(); render(); window.scrollTo(0, 0); } }
   else if (act === "open" && r) { const k = dkey(r.id, no, ph); S.ui.open[k] = !S.ui.open[k]; save(); keepScroll(); }
   else if (act === "void" && r) { if (confirm("この記録を取り消します(PCの集計から外れます)。よいですか?")) { voidRec(r.id, no, ph); render(); } }
@@ -221,19 +259,32 @@ document.addEventListener("click", async (e) => {
   else if (act === "clear" && r) { for (const h of r.horses) delete S.draft[dkey(r.id, h.no, ph)]; save(); render(); toast("入力をクリアしました"); }
   else if (act === "load") { try { const d = await loadData(document.getElementById("paste").value); view = "race"; render(); toast(`${d.races.length}レースを読み込みました`); } catch (err) { toast("読み込めません: " + err.message, 5000); } }
   else if (act === "copy") {
-    const t = exportRecords(); const out = document.getElementById("out"); out.value = t;
-    try { await navigator.clipboard.writeText(t); toast("コピーしました。PCに貼り付けてください"); } catch (err) { out.focus(); out.select(); toast("コピーできませんでした。下の文字列を選んでコピーしてください", 4500); }
+    const t = recText; const out = document.getElementById("out"); out.value = t;
+    try { await navigator.clipboard.writeText(t); toast("コピーしました。PCに貼り付けてください(壊れる場合は『ファイルで共有』を使ってください)", 4500); } catch (err) { out.focus(); out.select(); toast("コピーできませんでした。下の文字列を選んでコピーしてください", 4500); }
+  }
+  else if (act === "share") {
+    const name = `paddock_records_${ymd()}.txt`; const file = new File([recText], name, { type: "text/plain" });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: "パドック記録" });
+      else { download(name, recText); toast("ファイルを保存しました。ダウンロードの一覧からPCへ送ってください", 4500); }
+    } catch (err) { if (err && err.name !== "AbortError") { download(name, recText); toast("共有できなかったため、ファイルを保存しました", 4500); } }
   }
   else if (act === "wipe") { if (confirm("保存した記録を全部消します。PCに取り込み済みか確認しましたか?") && confirm("本当に消しますか?(元に戻せません)")) { S.obs = []; S.draft = {}; save(); render(); toast("消しました"); } }
 });
-document.addEventListener("change", (e) => { if (e.target.id === "race") { S.ui.race = e.target.value; save(); render(); window.scrollTo(0, 0); } });
+document.addEventListener("change", async (e) => {
+  if (e.target.id === "file" && e.target.files && e.target.files[0]) {
+    try { const d = await loadData(await e.target.files[0].text()); view = "race"; render(); toast(`${d.races.length}レースを読み込みました`); } catch (err) { toast("読み込めません: " + err.message, 6000); }
+    return;
+  }
+  if (e.target.id === "race") { S.ui.race = e.target.value; save(); render(); window.scrollTo(0, 0); } });
 document.addEventListener("input", (e) => {
   if (e.target.matches("[data-memo]")) { const card = e.target.closest(".card"); const r = curRace(); if (r && card) { ensureDraft(r.id, +card.dataset.no, S.ui.phase).memo = e.target.value; save(); } }
 });
 function keepScroll() { const y = window.scrollY; render(); window.scrollTo(0, y); }
 setInterval(() => { const r = curRace(); const el = document.getElementById("banner"); if (view === "race" && el && r) { const tmp = document.createElement("div"); tmp.innerHTML = banner(r); el.innerHTML = tmp.firstChild.innerHTML; } }, 30000);
 
-window.LH = { S: () => S, loadData, decodeData, saveRace, setGrade, setItem, toggleTag, exportRecords, savedOf, draftOf, render, startDate, reset: () => { S = defaults(); },
+applyTheme();
+window.LH = { crc32, applyTheme, S: () => S, loadData, decodeData, saveRace, setGrade, setItem, toggleTag, exportRecords, savedOf, draftOf, render, startDate, reset: () => { S = defaults(); },
   setView: (v) => { view = v; render(); }, setOpen: (rid, no, ph, on = true) => { S.ui.open[dkey(rid, no, ph)] = on; }, setPhase: (p) => { S.ui.phase = p; } };
 if (document.getElementById("app") && !window.__LH_TEST) render();
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
