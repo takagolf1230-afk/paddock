@@ -234,7 +234,7 @@ function viewData() {
   <div class="row"><button data-act="copy" data-needrec disabled class="grow">記録をコピー(文字列)</button></div>
   <textarea id="out" rows="3" readonly placeholder="準備中…" style="margin-top:8px"></textarea>
   <h2>そのほか</h2><div class="row"><button data-act="wipe" class="grow">保存した記録を全部消す</button></div>
-  <div class="mute" style="margin-top:12px">アプリのバージョン: 4(2026-11-04。明るい表示が標準。右上の『暗く/明るく』で切り替え。Googleドライブでの受け渡しの説明を追加)</div>`;
+  <div class="mute" style="margin-top:12px">アプリのバージョン: 5(2026-11-04。明るい表示が標準。右上の『暗く/明るく』で切り替え。Googleドライブでの受け渡し。共有で余計なファイルができないように修正)</div>`;
 }
 
 /* ---------- イベント ---------- */
@@ -265,7 +265,7 @@ document.addEventListener("click", async (e) => {
   else if (act === "share") {
     const name = `paddock_records_${ymd()}.txt`; const file = new File([recText], name, { type: "text/plain" });
     try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: "パドック記録" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });  // 題名(title)を付けると、iOSが『テキスト.txt』を余計に作るため付けない
       else { download(name, recText); toast("ファイルを保存しました。ダウンロードの一覧からPCへ送ってください", 4500); }
     } catch (err) { if (err && err.name !== "AbortError") { download(name, recText); toast("共有できなかったため、ファイルを保存しました", 4500); } }
   }
