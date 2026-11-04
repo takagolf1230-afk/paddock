@@ -225,16 +225,16 @@ function viewGuide() {
 }
 function viewData() {
   const d = S.data; const n = S.obs.filter((o) => !o.void).length;
-  return `<h2>データ(PC → スマホ)</h2><div class="banner">${d ? `読み込み済み: <b>${esc(d.date)}</b> ${d.races.length}レース(作成 ${esc(d.made || "")})` : "未読み込みです。"}<br><span class="mute">PCの穴馬検索で『スマホ用データをコピー』を押し、メモやLINEなどでスマホに送って、ここに貼り付けます。</span></div>
+  return `<h2>データ(PC → スマホ)</h2><div class="banner">${d ? `読み込み済み: <b>${esc(d.date)}</b> ${d.races.length}レース(作成 ${esc(d.made || "")})` : "未読み込みです。"}<br><span class="mute"><b>Googleドライブを使う場合(おすすめ)</b>: PCの穴馬検索で『スマホ用データをコピー』を押すと、同期フォルダに自動で置かれます。下の『ファイルを選ぶ』→『ドライブ』→ <b>phone_data_latest.txt</b> を選ぶだけです。<br>そうでない場合は、文字列をスマホに送って、ここに貼り付けます。</span></div>
   <textarea id="paste" rows="4" placeholder="LH1:…"></textarea><div class="row" style="margin-top:8px"><button data-act="load" class="grow">貼り付けた文字列を読み込む</button></div>
   <div style="margin-top:8px"><div class="mute">または、PCが作ったファイル(phone_data_日付.txt)を選ぶ(文字列が壊れる心配がありません)</div><input type="file" id="file" accept=".txt,text/plain" style="margin-top:6px;width:100%"></div>
   <h2>記録(スマホ → PC)</h2><div class="banner">保存した記録: <b>${n}件</b>(取り消した分は含みません)<br><span class="mute">レースが終わったら『記録をコピー』を押し、PCの穴馬検索『パドック』タブの『スマホの記録を取り込む』に貼り付けます。記録はこの端末の中だけに保存されています。Safariのデータを消すと消えるので、こまめにコピーしてください。</span></div>
   <div class="row"><button data-act="share" data-needrec disabled class="grow" style="background:var(--accent);color:#1b1810;border-color:var(--accent);font-weight:800">ファイルで共有(おすすめ)</button></div>
-  <div class="mute" style="margin:4px 0 8px">共有の画面で『メール』『LINE』『ファイル(iCloud Drive)』『AirDrop』などを選び、PCで開けるところへ送ります。文字列と違って、途中で壊れません。</div>
+  <div class="mute" style="margin:4px 0 8px"><b>Googleドライブを使う場合(おすすめ)</b>: 共有の画面で『ファイルに保存』→『ドライブ』→ PCの同期フォルダと同じフォルダを選びます。PCでは『同期フォルダから取り込む』を押すだけです(2回目からは、同じフォルダが最初に出ます)。メール・LINE・AirDropなどで送ってもよく、文字列と違って、途中で壊れません。</div>
   <div class="row"><button data-act="copy" data-needrec disabled class="grow">記録をコピー(文字列)</button></div>
   <textarea id="out" rows="3" readonly placeholder="準備中…" style="margin-top:8px"></textarea>
   <h2>そのほか</h2><div class="row"><button data-act="wipe" class="grow">保存した記録を全部消す</button></div>
-  <div class="mute" style="margin-top:12px">アプリのバージョン: 3(2026-11-04。明るい表示を標準にして、文字を大きくした。右上の『暗く/明るく』で切り替え)</div>`;
+  <div class="mute" style="margin-top:12px">アプリのバージョン: 4(2026-11-04。明るい表示が標準。右上の『暗く/明るく』で切り替え。Googleドライブでの受け渡しの説明を追加)</div>`;
 }
 
 /* ---------- イベント ---------- */
